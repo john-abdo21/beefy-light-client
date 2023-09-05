@@ -1,5 +1,6 @@
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
+use hash_db::Hasher;
 
 use crate::Hash;
 use hash_db::Hasher;

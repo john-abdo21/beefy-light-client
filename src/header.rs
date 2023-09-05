@@ -136,13 +136,13 @@ pub struct ChangesTrieConfiguration {
 #[repr(u32)]
 #[derive(Encode, Decode)]
 pub enum DigestItemType {
-	Other = 0,
-	ChangesTrieRoot = 2,
-	Consensus = 4,
-	Seal = 5,
-	PreRuntime = 6,
-	ChangesTrieSignal = 7,
-	RuntimeEnvironmentUpdated = 8,
+	Other = 0u32,
+	ChangesTrieRoot = 2u32,
+	Consensus = 4u32,
+	Seal = 5u32,
+	PreRuntime = 6u32,
+	ChangesTrieSignal = 7u32,
+	RuntimeEnvironmentUpdated = 8u32,
 }
 
 impl Encode for DigestItem {
@@ -219,7 +219,7 @@ mod tests {
 
 		let header = Header::decode(&mut &encoded_header[..]);
 
-		assert_eq!(header.is_ok(), true);
+		assert!(header.is_ok());
 	}
 
 	#[test]
@@ -228,7 +228,7 @@ mod tests {
 
 		let header = Header::decode(&mut &encoded_header[..]);
 
-		assert_eq!(header.is_ok(), true);
+		assert!(header.is_ok());
 	}
 
 	#[test]
@@ -250,4 +250,7 @@ mod tests {
 			hex!("b0fc041accc53f07e0249cf63a6364c7aac035855e343b4e673a7af87f048941")
 		);
 	}
+
+	#[test]
+	fn test_encode_header_and_decode_header() {}
 }
