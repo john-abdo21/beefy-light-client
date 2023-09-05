@@ -8,6 +8,8 @@ use hash_db::Hasher;
 
 use crate::{keccak256::Keccak256, BeefyNextAuthoritySet, Hash};
 use codec::{Decode, Encode};
+use hash_db::Hasher;
+use sp_runtime::traits::Keccak256;
 
 #[derive(Clone, Debug, Default, Encode, Decode, PartialEq, Eq)]
 pub struct MmrLeafVersion(pub u8);
@@ -110,7 +112,8 @@ impl NodesUtils {
 	}
 }
 
-struct HashMerger;
+#[derive(Clone)]
+pub struct HashMerger;
 
 impl mmr_lib::Merge for HashMerger {
 	type Item = Hash;
@@ -120,7 +123,15 @@ impl mmr_lib::Merge for HashMerger {
 		combined[0..32].copy_from_slice(&left[..]);
 		combined[32..64].copy_from_slice(&right[..]);
 
-		Ok(Keccak256::hash(&combined))
+		Keccak256::hash(&combined).into()
+	}
+}
+
+impl rs_merkle::Hasher for HashMerger {
+	type Hash = Hash;
+
+	fn hash(data: &[u8]) -> Self::Hash {
+		Keccak256::hash(&data).into()
 	}
 }
 

@@ -9,7 +9,7 @@ use alloc::string::{String, ToString};
 #[cfg(not(feature = "std"))]
 use alloc::vec::Vec;
 
-use binary_merkle_tree::{merkle_root, verify_proof};
+use binary_merkle_tree::{merkle_root, verify_proof}
 use borsh::{BorshDeserialize, BorshSerialize};
 use codec::{Decode, Encode};
 use commitment::{
@@ -26,12 +26,71 @@ pub mod errors;
 pub mod header;
 pub mod keccak256;
 pub mod mmr;
+pub mod parachain;
 pub mod simplified_mmr;
 pub mod validator_set;
-
-use crate::keccak256::Keccak256;
+use crate::keccak256::Keccak256
 pub use commitment::BeefyPayloadId;
 use errors::Error;
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum Error {
+	/// [Commitment] can't be imported, cause it's signed by either past or future validator set.
+	InvalidValidatorSetId { expected: ValidatorSetId, got: ValidatorSetId },
+	/// [Commitment] can't be imported, cause it's a set transition block and the proof is missing.
+	InvalidValidatorProof,
+	/// There are too many signatures in the commitment - more than validators.
+	InvalidNumberOfSignatures {
+		/// Number of validators in the set.
+		expected: usize,
+		/// Numbers of signatures in the commitment.
+		got: usize,
+	},
+	/// [SignedCommitment] doesn't have enough valid signatures.
+	NotEnoughValidSignatures { expected: usize, got: usize, valid: Option<usize> },
+	/// Next validator set has not been provided by any of the previous commitments.
+	MissingNextValidatorSetData,
+	/// Couldn't verify the proof against MMR root of the latest commitment.
+	InvalidMmrProof(String),
+	///
+	InvalidSignature,
+	///
+	InvalidMessage,
+	///
+	InvalidVersionedFinalityProof,
+	///
+	InvalidCommitmentPayload,
+	///
+	InvalidRecoveryId,
+	///
+	WrongSignature,
+	///
+	InvalidMmrLeafProof,
+	///
+	DigestNotFound,
+	///
+	DigestNotMatch,
+	///
+	HeaderHashNotMatch,
+	///
+	CantDecodeHeader,
+	///
+	CantDecodeMmrLeaf,
+	///
+	CantDecodeMmrProof,
+	///
+	MissingLatestCommitment,
+	///
+	CommitmentAlreadyUpdated,
+	///
+	ValidatorNotFound,
+	///
+	MissingInProcessState,
+	///
+	Custom(String),
+	///
+	DecodeHeaderFaild(String),
+}
 
 /// Supported hashing output size.
 ///
@@ -101,7 +160,25 @@ pub struct LightClient {
 	pub validator_set: BeefyNextAuthoritySet<Hash>,
 	pub in_process_state: Option<InProcessState>,
 }
+// Initialize light client using the BeefyId of the initial validator set.
+pub fn new(initial_public_keys: Vec<String>) -> LightClient {
+	let initial_public_keys: Vec<Vec<u8>> = initial_public_keys
+		.into_iter()
+		.map(|hex_str| {
+			hex::decode(&hex_str[2..])
+				.map(|compressed_key| beefy_ecdsa_to_ethereum(&compressed_key))
+				.unwrap_or_default()
+		})
+		.collect();
 
+	LightClient {
+		latest_commitment: None,
+		validator_set: BeefyNextAuthoritySet {
+			id: 0,
+			len: initial_public_keys.len() as u32,
+			root: merkle_root::<Keccak256, _>(initial_public_keys).into(),
+		},
+		in_process_state: None,
 impl LightClient {
 	// Initialize light client using the BeefyId of the initial validator set.
 	pub fn new(initial_public_keys: Vec<String>) -> LightClient {
@@ -296,7 +373,14 @@ impl LightClient {
 			.payload
 			.get_decoded(&MMR_ROOT_ID)
 			.ok_or(Error::InvalidCommitmentPayload)?;
-
+		let mmr_proof = mmr::MmrLeafProof::decode(&mut &mmr_proof[..])
+			.map_err(|_| Error::CantDecodeMmrProof)?;
+		let mmr_leaf: Vec<u8> =
+			Decode::decode(&mut &mmr_leaf[..]).map_err(|_| Error::CantDecodeMmrLeaf)?;
+		let mmr_leaf_hash = Keccak256::hash(&mmr_leaf[..]);
+		let mmr_leaf: MmrLeaf =
+			Decode::decode(&mut &*mmr_leaf).map_err(|_| Error::CantDecodeMmrLeaf)?;
+		let result = mmr::verify_leaf_proof(mmr_root, mmr_leaf_hash.into(), mmr_proof)?;
 		let (hash_leaves, mmr_proof) =
 			LightClient::decode_mmr_leaves_and_proof(mmr_leaves, mmr_proof)?;
 
@@ -385,7 +469,7 @@ impl LightClient {
 		let header = Header::decode(&mut &header[..]).map_err(|_| Error::CantDecodeHeader)?;
 		let header_digest = header.get_other().ok_or(Error::DigestNotFound)?;
 
-		let messages_hash = Keccak256::hash(messages);
+		let messages_hash: Hash = Keccak256::hash(messages).into();
 		if messages_hash != header_digest[..] {
 			return Err(Error::DigestNotMatch)
 		}
@@ -417,8 +501,11 @@ impl LightClient {
 		Ok(())
 	}
 
-	pub fn verify_parachain_messages(&self) -> Result<(), Error> {
-		Ok(())
+	pub fn verify_parachain_messages(
+		&self,
+		parachain_update_proof: ParachainsUpdateProof,
+	) -> Result<(), Error> {
+		self.verify_parachain_headers(parachain_update_proof)
 	}
 
 	pub fn verify_commitment_signatures(
@@ -431,6 +518,33 @@ impl LightClient {
 	) -> Result<(), Error> {
 		let msg = libsecp256k1::Message::parse_slice(&commitment_hash[..])
 			.or(Err(Error::InvalidMessage))?;
+		for signature in signatures.iter().skip(start_position).take(interations).flatten() {
+			let sig = libsecp256k1::Signature::parse_standard_slice(&signature.0[..64])
+				.or(Err(Error::InvalidSignature))?;
+			let recovery_id = libsecp256k1::RecoveryId::parse(signature.0[64])
+				.or(Err(Error::InvalidRecoveryId))?;
+			let validator = libsecp256k1::recover(&msg, &sig, &recovery_id)
+				.or(Err(Error::WrongSignature))?
+				.serialize()
+				.to_vec();
+			let validator_address = Keccak256::hash(&validator[1..])[12..].to_vec();
+			let mut found = false;
+			for proof in validator_proofs.iter() {
+				if validator_address == *proof.leaf {
+					found = true;
+					if !verify_proof::<Keccak256, _, _>(
+						&H256::from(validator_set_root),
+						proof
+							.proof
+							.clone()
+							.into_iter()
+							.map(|value| H256::from(value))
+							.collect::<Vec<_>>(),
+						proof.number_of_leaves,
+						proof.leaf_index,
+						&proof.leaf,
+					) {
+						return Err(Error::InvalidValidatorProof)
 		// println!("verify_commitment_signatures:commiment msg is {:?}", msg);
 		for signature in signatures.into_iter().skip(start_position).take(interations) {
 			if let Some(signature) = signature {
@@ -471,7 +585,6 @@ impl LightClient {
 							return Err(Error::InvalidValidatorProof);
 						}
 						break;
-// =======
 // 		for signature in signatures.iter().skip(start_position).take(interations).flatten() {
 // 			let sig = libsecp256k1::Signature::parse_standard_slice(&signature.0[..64])
 // 				.or(Err(Error::InvalidSignature))?;

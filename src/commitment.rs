@@ -9,11 +9,15 @@ use hash_db::Hasher;
 #[cfg(feature = "std")]
 use std::cmp;
 
+use crate::Hash;
+=======
 use crate::{keccak256::Keccak256, Hash};
 use borsh::{BorshDeserialize, BorshSerialize};
 use codec::{Decode, Encode, Error, Input, MaxEncodedLen};
 use core::convert::TryInto;
+use hash_db::Hasher;
 use scale_info::TypeInfo;
+use sp_runtime::traits::Keccak256;
 use serde::{Deserialize, Serialize};
 
 /// A signature (a 512-bit value, plus 8 bits for recovery ID).
@@ -162,7 +166,7 @@ impl cmp::Ord for Commitment {
 
 impl Commitment {
 	pub fn hash(&self) -> Hash {
-		Keccak256::hash(&self.encode())
+		Keccak256::hash(&self.encode()).into()
 	}
 }
 

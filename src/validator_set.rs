@@ -1,9 +1,15 @@
+
 use borsh::{BorshDeserialize, BorshSerialize};
 use codec::{Decode, Encode};
 
 /// A typedef for validator set id.
 pub type ValidatorSetId = u64;
 
+
+#[derive(
+	Clone, Debug, Default, PartialEq, Eq, Encode, Decode, BorshDeserialize, BorshSerialize,
+)]
+pub struct BeefyNextAuthoritySet 
 // ref: https://github.com/paritytech/substrate/blob/49ba186c53c24a3ace99c55ecd75370d8e65da1f/primitives/consensus/beefy/src/mmr.rs#L105
 #[derive(
 	Clone, Debug, Default, Encode, Decode, BorshDeserialize, BorshSerialize, PartialEq, Eq,
