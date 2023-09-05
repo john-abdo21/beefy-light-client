@@ -1,19 +1,14 @@
 use beefy_light_client::{
 	beefy_ecdsa_to_ethereum,
-	commitment::{
-		known_payload_ids::MMR_ROOT_ID, Commitment, Payload, Signature, SignedCommitment,
-	},
-	header::{Digest, Header},
-	mmr::{MmrLeaf, MmrLeafProof},
-	new,
+	commitment::{Signature, SignedCommitment, VersionedFinalityProof},
+	keccak256::Keccak256,
 	validator_set::BeefyNextAuthoritySet,
-	ValidatorMerkleProof,
+	LightClient, ValidatorMerkleProof,
 };
-use beefy_merkle_tree::{merkle_proof, merkle_root, Keccak256};
+use binary_merkle_tree::{merkle_proof, merkle_root};
 use codec::{Decode, Encode};
 use hex_literal::hex;
 use secp256k1_test::{rand::thread_rng, Message as SecpMessage, Secp256k1};
-use std::convert::TryInto;
 
 #[test]
 fn update_state_works() {
@@ -21,179 +16,69 @@ fn update_state_works() {
 	// Secret Key URI `//Alice` is account:
 	//   Public key (hex):  0x020a1091341fe5664bfa1782d5e04779689068c916b04cb365ec3153755684d9a1
 	let public_keys = vec![
-		"0x020a1091341fe5664bfa1782d5e04779689068c916b04cb365ec3153755684d9a1".to_string(), // Alice
-		"0x0390084fdbf27d2b79d26a4f13f0ccd982cb755a661969143c37cbc49ef5b91f27".to_string(), // Bob
-		"0x0389411795514af1627765eceffcbd002719f031604fadd7d188e2dc585b4e1afb".to_string(), // Charlie
-		"0x03bc9d0ca094bd5b8b3225d7651eac5d18c1c04bf8ae8f8b263eebca4e1410ed0c".to_string(), // Dave
-		"0x031d10105e323c4afce225208f71a6441ee327a65b9e646e772500c74d31f669aa".to_string(), // Eve
+		"020a1091341fe5664bfa1782d5e04779689068c916b04cb365ec3153755684d9a1".to_string(), // Alice
+		"0390084fdbf27d2b79d26a4f13f0ccd982cb755a661969143c37cbc49ef5b91f27".to_string(), // Bob
+		"0389411795514af1627765eceffcbd002719f031604fadd7d188e2dc585b4e1afb".to_string(), // Charlie
+		"03bc9d0ca094bd5b8b3225d7651eac5d18c1c04bf8ae8f8b263eebca4e1410ed0c".to_string(), // Dave
 	];
 
-	let mut lc = new(public_keys);
-	println!("light client: {:?}", lc);
+	// authoritySetRoot: {"id":0,"len":4,"root":"0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519"}
+	// authoritySetProof: {"root":"0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519","proof":["0xf68aec7304bf37f340dae2ea20fb5271ee28a3128812b84a615da4789e458bde","0x93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab"],"number_of_leaves":4,"leaf_index":0,"leaf":"0xe04cc55ebee1cbce552f250e85c57b70b2e2625b"}
+	// authoritySetProof: {"root":"0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519","proof":["0xaeb47a269393297f4b0a3c9c9cfd00c7a4195255274cf39d83dabc2fcc9ff3d7","0x93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab"],"number_of_leaves":4,"leaf_index":1,"leaf":"0x25451a4de12dccc2d166922fa938e900fcc4ed24"}
+	// authoritySetProof: {"root":"0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519","proof":["0x50bdd3ac4f54a04702a055c33303025b2038446c7334ed3b3341f310f052116f","0x697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce402"],"number_of_leaves":4,"leaf_index":2,"leaf":"0x5630a480727cd7799073b36472d9b1a6031f840b"}
+	// authoritySetProof: {"root":"0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519","proof":["0x3eb799651607280e854bd2e42c1df1c8e4a6167772dfb3c64a813e40f6e87136","0x697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce402"],"number_of_leaves":4,"leaf_index":3,"leaf":"0x4bb32a4263e369acbb6c020ffa89a41fd9722894"}
+	// encoded authoritySetProof: 0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651908f68aec7304bf37f340dae2ea20fb5271ee28a3128812b84a615da4789e458bde93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab0400000000000000000000000000000050e04cc55ebee1cbce552f250e85c57b70b2e2625b
+	// encoded authoritySetProof: 0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651908aeb47a269393297f4b0a3c9c9cfd00c7a4195255274cf39d83dabc2fcc9ff3d793c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab040000000000000001000000000000005025451a4de12dccc2d166922fa938e900fcc4ed24
+	// encoded authoritySetProof: 0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe290565190850bdd3ac4f54a04702a055c33303025b2038446c7334ed3b3341f310f052116f697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce40204000000000000000200000000000000505630a480727cd7799073b36472d9b1a6031f840b
+	// encoded authoritySetProof: 0x2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519083eb799651607280e854bd2e42c1df1c8e4a6167772dfb3c64a813e40f6e87136697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce40204000000000000000300000000000000504bb32a4263e369acbb6c020ffa89a41fd9722894
+	let encoded_authority_set_proof = vec![
+        hex!("2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651908f68aec7304bf37f340dae2ea20fb5271ee28a3128812b84a615da4789e458bde93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab0400000000000000000000000000000050e04cc55ebee1cbce552f250e85c57b70b2e2625b").to_vec(),
+        hex!("2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651908aeb47a269393297f4b0a3c9c9cfd00c7a4195255274cf39d83dabc2fcc9ff3d793c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab040000000000000001000000000000005025451a4de12dccc2d166922fa938e900fcc4ed24").to_vec(),
+        hex!("2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe290565190850bdd3ac4f54a04702a055c33303025b2038446c7334ed3b3341f310f052116f697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce40204000000000000000200000000000000505630a480727cd7799073b36472d9b1a6031f840b").to_vec(),
+        hex!("2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519083eb799651607280e854bd2e42c1df1c8e4a6167772dfb3c64a813e40f6e87136697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce40204000000000000000300000000000000504bb32a4263e369acbb6c020ffa89a41fd9722894").to_vec(),
+    ];
 
-	let alice_pk = beefy_ecdsa_to_ethereum(
-		&hex!("020a1091341fe5664bfa1782d5e04779689068c916b04cb365ec3153755684d9a1")[..],
-	);
-	let bob_pk = beefy_ecdsa_to_ethereum(
-		&hex!("0390084fdbf27d2b79d26a4f13f0ccd982cb755a661969143c37cbc49ef5b91f27")[..],
-	);
-	let charlie_pk = beefy_ecdsa_to_ethereum(
-		&hex!("0389411795514af1627765eceffcbd002719f031604fadd7d188e2dc585b4e1afb")[..],
-	);
-	let dave_pk = beefy_ecdsa_to_ethereum(
-		&hex!("03bc9d0ca094bd5b8b3225d7651eac5d18c1c04bf8ae8f8b263eebca4e1410ed0c")[..],
-	);
-	let eve_pk = beefy_ecdsa_to_ethereum(
-		&hex!("031d10105e323c4afce225208f71a6441ee327a65b9e646e772500c74d31f669aa")[..],
-	);
+	let mut lc = LightClient::new(public_keys);
 
-	let encoded_signed_commitment_1 = hex!("046d688017ffed791fa51b459d3c953a1f8f3e4718bcf8aa571a19bc0327d82761d3257909000000000000000000000004d80500000010c73029d26bba5d549db469b75950c4cb55aaf43de0044a32612acca99445bbf93a1edbc9f5fa5151c1a2e2b6f59968eb1485d001c6b9078c2ed310bad20779b001a4b79f6018e3936a64bd3281dca522fb33bf68720afff458c7ca0db1bfbd270d36c5c3db98abb59d9abbeda7b74b83510120172e7aa6c74f5c9239c85befa85f003bed8b85ff2f466df62569d4cd0169773b4ae4dde1139d4d0721b497f938312803e1885b21f6230ef5a8e44ad3dbbb1cd0e89226a41e35507e91ed62bcf4dc22013f45d94e3a6b97f5208d90d2bf3f2702a440f3f453c438cdd553bf2f2cc02cc23b230b3b12c1e68e39fbaf701e65457a372facba3c530ab56f3eec5e6766eddb01");
-	let signed_commitment_1 = SignedCommitment::decode(&mut &encoded_signed_commitment_1[..]);
-	println!("signed_commitment_1: {:?}", signed_commitment_1);
+	// versionedFinalityProof: {"version":1,"commitment":{"payload":[["0x6d68","0x6562967f2108e09124f0f41c8fac19d34f3e66e4fe174010a70dc7b3013cc867"]],"blockNumber":17,"validatorSetId":0},"signatures_from":"0xb0","validator_set_len":4,"signatures_compact":["0xdea8a73e4536c824d1c4a250e1814847394d4af12c953a8f8e38f6c9aba4346054610f638bc0b96097e3f5fb621db2bc394e90d8a941db7cb4513c36b99a4b5001","0x474b736813aca2532f90bdb3af15a05a5c6acb5443f70b7d93d50be9dec1c6d277447bdbbc4383a7318f19c4f9a976c05fbf04c55787f2f8acea7a352d6a3a3b01","0x4d5030229be0084ee3b11e386bde84ecf7f78f31ca88e399c09fa09488821aee52836c147a920b9c891c2b65fe1c6b3ac4a6ca70bbdb66e88ff105804ab0c4ba00"]}
+	// encoded versionedFinalityProof: 0x01046d68806562967f2108e09124f0f41c8fac19d34f3e66e4fe174010a70dc7b3013cc86711000000000000000000000004b0040000000cdea8a73e4536c824d1c4a250e1814847394d4af12c953a8f8e38f6c9aba4346054610f638bc0b96097e3f5fb621db2bc394e90d8a941db7cb4513c36b99a4b5001474b736813aca2532f90bdb3af15a05a5c6acb5443f70b7d93d50be9dec1c6d277447bdbbc4383a7318f19c4f9a976c05fbf04c55787f2f8acea7a352d6a3a3b014d5030229be0084ee3b11e386bde84ecf7f78f31ca88e399c09fa09488821aee52836c147a920b9c891c2b65fe1c6b3ac4a6ca70bbdb66e88ff105804ab0c4ba00
+	let encoded_versioned_finality_proof_1 = hex!("01046d68806562967f2108e09124f0f41c8fac19d34f3e66e4fe174010a70dc7b3013cc86711000000000000000000000004b0040000000cdea8a73e4536c824d1c4a250e1814847394d4af12c953a8f8e38f6c9aba4346054610f638bc0b96097e3f5fb621db2bc394e90d8a941db7cb4513c36b99a4b5001474b736813aca2532f90bdb3af15a05a5c6acb5443f70b7d93d50be9dec1c6d277447bdbbc4383a7318f19c4f9a976c05fbf04c55787f2f8acea7a352d6a3a3b014d5030229be0084ee3b11e386bde84ecf7f78f31ca88e399c09fa09488821aee52836c147a920b9c891c2b65fe1c6b3ac4a6ca70bbdb66e88ff105804ab0c4ba00");
+	// check that the value can be decoded
+	let versioned_finality_proof_1 =
+		VersionedFinalityProof::decode(&mut &encoded_versioned_finality_proof_1[..]);
+	println!("versioned_finality_proof_1: {:?}", versioned_finality_proof_1);
+	// leavesProof: {"blockHash":"0x71c766f9414325ef2c350349ac79123df427ed3bb9250d87997f87546849e53e","leaves":"0x044901000f00000040a1c43578f308d9f349e52cb094fe224b486ee0891e9d9bec15b10e8fbb37930100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900","proof":"0x040f00000000000000110000000000000014e497c56a44bd5595d2e5d7fab03853ad50ce69a76d366b2d35bcc2bb72e9395a411a84c1758f473c3ca88f8607153f805153e6e0f58510b40af019bd025421107a68cf5818c26afff0be34424545799d679846b08ad6801b60383863c5f4b128660e06dec777ea0fc1aabaaa5c71f93025785ed29a6e88aec7acda7680c208194c6c447cc3d80014a78c07eef12b2fa4b4941fde9bb0906b5c0ed123c2af4487"}
+	let encoded_mmr_leaves_1 =  hex!("044901000f00000040a1c43578f308d9f349e52cb094fe224b486ee0891e9d9bec15b10e8fbb37930100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900");
+	let encoded_mmr_proof_1 =  hex!("040f00000000000000110000000000000014e497c56a44bd5595d2e5d7fab03853ad50ce69a76d366b2d35bcc2bb72e9395a411a84c1758f473c3ca88f8607153f805153e6e0f58510b40af019bd025421107a68cf5818c26afff0be34424545799d679846b08ad6801b60383863c5f4b128660e06dec777ea0fc1aabaaa5c71f93025785ed29a6e88aec7acda7680c208194c6c447cc3d80014a78c07eef12b2fa4b4941fde9bb0906b5c0ed123c2af4487");
 
-	let validator_proofs_1 = vec![
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("f68aec7304bf37f340dae2ea20fb5271ee28a3128812b84a615da4789e458bde").into(),
-				hex!("93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 0,
-			leaf: alice_pk.clone(),
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("aeb47a269393297f4b0a3c9c9cfd00c7a4195255274cf39d83dabc2fcc9ff3d7").into(),
-				hex!("93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 1,
-			leaf: bob_pk.clone(),
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("50bdd3ac4f54a04702a055c33303025b2038446c7334ed3b3341f310f052116f").into(),
-				hex!("697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce402").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 2,
-			leaf: charlie_pk.clone(),
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("3eb799651607280e854bd2e42c1df1c8e4a6167772dfb3c64a813e40f6e87136").into(),
-				hex!("697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce402").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 3,
-			leaf: dave_pk.clone(),
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519").into()
-			],
-			number_of_leaves: 5,
-			leaf_index: 4,
-			leaf: eve_pk.clone(),
-		},
-	];
-
-	let  encoded_mmr_leaf_1 = hex!("c50100080000005717d626ed925ebf1deaf25cb24ad7bca9384bbe533a938856466cc09fd26292010000000000000005000000304803fa5a91d9852caafe04b4b867a4ed27a07a5bee3d1507b4b187a68777a20000000000000000000000000000000000000000000000000000000000000000");
-
-	let leaf: Vec<u8> = Decode::decode(&mut &encoded_mmr_leaf_1[..]).unwrap();
-	let mmr_leaf_1: MmrLeaf = Decode::decode(&mut &*leaf).unwrap();
-	println!("mmr_leaf_1: {:?}", mmr_leaf_1);
-
-	let encoded_mmr_proof_1 =  hex!("0800000000000000090000000000000004effbabd0a9fcade34208684b3d5d69a52b2c9bc9265d872c2590636acd6342a0");
-	let mmr_proof_1 = MmrLeafProof::decode(&mut &encoded_mmr_proof_1[..]);
-	println!("mmr_proof_1: {:?}", mmr_proof_1);
 	assert!(lc
 		.update_state(
-			&encoded_signed_commitment_1,
-			&validator_proofs_1,
-			&encoded_mmr_leaf_1,
-			&encoded_mmr_proof_1,
+			&encoded_versioned_finality_proof_1,
+			&encoded_authority_set_proof,
+			Some(&encoded_mmr_leaves_1),
+			Some(&encoded_mmr_proof_1),
 		)
 		.is_ok());
-	println!("light client: {:?}", lc);
 
-	let encoded_signed_commitment_2 = hex!("046d688037d21b14f9701ca2deb9946dbad32de48d8df3ad8988bfaabdbafa329fe07ccd11000000000000000000000004d80500000010b6f60090f011f376a7673d38a810ad15423381fbf6e8e1a88c2d39d58b5473b83dae3750c39be39be17bada861944b2d6f43c7e329b247905eb17dc3ecdb7f8a0062969c39737b7b3101d639ed2bd8aa3a61647bb4569d2a6c78b450e46012879919c90b149493d523d030490e389b3d4ee1e3f2a24f4e0cf5cd4944c03921ed3500389cf1cfe7c117052416db37920594387170fd404f79b98dc39f9b56ede6865a10306bf55a2d8814e36dbb51142f015813acbb1b187fdfefcc1f05b6505dce83019962e14afb83630dffec978b47f52016af699d21d4b1661acf4c01bb4845adcc4fa3e421dca35fb0c4d58d387bdc0d11ec161502e7c6f85c86849f569bc8b4c401");
-	let signed_commitment_2 = SignedCommitment::decode(&mut &encoded_signed_commitment_2[..]);
-	println!("signed_commitment_2: {:?}", signed_commitment_2);
+	// versionedFinalityProof: {"version":1,"commitment":{"payload":[["0x6d68","0xb530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be1"]],"blockNumber":25,"validatorSetId":0},"signatures_from":"0xe0","validator_set_len":4,"signatures_compact":["0x3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801","0x992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00","0xbfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00"]}
+	// encoded versionedFinalityProof: 0x01046d6880b530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be119000000000000000000000004e0040000000c3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00bfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00
+	let encoded_versioned_finality_proof_2 = hex!("01046d6880b530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be119000000000000000000000004e0040000000c3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00bfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00");
+	// check that the value can be decoded
+	let versioned_finality_proof_2 =
+		VersionedFinalityProof::decode(&mut &encoded_versioned_finality_proof_2[..]);
+	println!("versioned_finality_proof_2: {:?}", versioned_finality_proof_2);
+	// leavesProof: {"blockHash":"0x9ace34d4dcf39773de158da6ca9970ed9f7e4a3277c3d37744624fd3ec9d49ae","leaves":"0x0449010017000000f126e6251f6df464796796e2167e71517141d5042c72e1f5b678914cdaffadbd0100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900","proof":"0x041700000000000000190000000000000014ecbb56fad1763cfcf85065a1e7d3e640f25c24db82c9d547bba4f8a31813799b9278b1352647cba599641add3192dadd29d957d3df08da96e95356eecfcb4f297236345e4e4ea051ac330d46d80d3e8c7ec6e686ef91eb7eb1f7413e375eabfb7a15d088eef383c859b75daad24f0742176a12b0aed30ab5cd069b777e9395545900ca2d5603cc78df844a46b9cf56f4c3d274569400cbf0c994c4c41a58f90d"}
+	let encoded_mmr_leaves_2 =  hex!("0449010017000000f126e6251f6df464796796e2167e71517141d5042c72e1f5b678914cdaffadbd0100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900");
+	let encoded_mmr_proof_2 =  hex!("041700000000000000190000000000000014ecbb56fad1763cfcf85065a1e7d3e640f25c24db82c9d547bba4f8a31813799b9278b1352647cba599641add3192dadd29d957d3df08da96e95356eecfcb4f297236345e4e4ea051ac330d46d80d3e8c7ec6e686ef91eb7eb1f7413e375eabfb7a15d088eef383c859b75daad24f0742176a12b0aed30ab5cd069b777e9395545900ca2d5603cc78df844a46b9cf56f4c3d274569400cbf0c994c4c41a58f90d");
 
-	let validator_proofs_2 = vec![
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("f68aec7304bf37f340dae2ea20fb5271ee28a3128812b84a615da4789e458bde").into(),
-				hex!("93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 0,
-			leaf: alice_pk,
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("aeb47a269393297f4b0a3c9c9cfd00c7a4195255274cf39d83dabc2fcc9ff3d7").into(),
-				hex!("93c6c7e160154c8467b700c291a1d4da94ae9aaf1c5010003a6aa3e9b18657ab").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 1,
-			leaf: bob_pk,
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("50bdd3ac4f54a04702a055c33303025b2038446c7334ed3b3341f310f052116f").into(),
-				hex!("697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce402").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 2,
-			leaf: charlie_pk,
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("3eb799651607280e854bd2e42c1df1c8e4a6167772dfb3c64a813e40f6e87136").into(),
-				hex!("697ea2a8fe5b03468548a7a413424a6292ab44a82a6f5cc594c3fa7dda7ce402").into(),
-				hex!("55ca68207e72b7a7cd012364e03ac9ee560eb1b26de63f0ee42a649d74f3bf58").into(),
-			],
-			number_of_leaves: 5,
-			leaf_index: 3,
-			leaf: dave_pk,
-		},
-		ValidatorMerkleProof {
-			proof: vec![
-				hex!("2145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe29056519").into()
-			],
-			number_of_leaves: 5,
-			leaf_index: 4,
-			leaf: eve_pk,
-		},
-	];
-
-	let encoded_mmr_leaf_2 = hex!("c501001000000027aa6e9a63fe73429eaadc49018eed6d2f6362cdb18744677acfaca8be94838a010000000000000005000000304803fa5a91d9852caafe04b4b867a4ed27a07a5bee3d1507b4b187a68777a20000000000000000000000000000000000000000000000000000000000000000");
-
-	let leaf: Vec<u8> = Decode::decode(&mut &encoded_mmr_leaf_2[..]).unwrap();
-	let mmr_leaf_2: MmrLeaf = Decode::decode(&mut &*leaf).unwrap();
-	println!("mmr_leaf_2: {:?}", mmr_leaf_2);
-
-	let encoded_mmr_proof_2 = hex!("10000000000000001100000000000000043b96661a7161a6a760af588ebdefc79401e1c046d889d59f76d824406f713188");
-	let mmr_proof_2 = MmrLeafProof::decode(&mut &encoded_mmr_proof_2[..]);
-	println!("mmr_proof_2: {:?}", mmr_proof_2);
 	assert!(lc
 		.update_state(
-			&encoded_signed_commitment_2,
-			&validator_proofs_2,
-			&encoded_mmr_leaf_2,
-			&encoded_mmr_proof_2,
+			&encoded_versioned_finality_proof_2,
+			&encoded_authority_set_proof,
+			Some(&encoded_mmr_leaves_2),
+			Some(&encoded_mmr_proof_2),
 		)
 		.is_ok());
-	println!("light client: {:?}", lc);
 }
 
 #[test]
@@ -203,76 +88,31 @@ fn verify_solochain_messages_works() {
 		"0x0390084fdbf27d2b79d26a4f13f0ccd982cb755a661969143c37cbc49ef5b91f27".to_string(), // Bob
 		"0x0389411795514af1627765eceffcbd002719f031604fadd7d188e2dc585b4e1afb".to_string(), // Charlie
 		"0x03bc9d0ca094bd5b8b3225d7651eac5d18c1c04bf8ae8f8b263eebca4e1410ed0c".to_string(), // Dave
-		"0x031d10105e323c4afce225208f71a6441ee327a65b9e646e772500c74d31f669aa".to_string(), // Eve
 	];
 
-	let mut lc = new(public_keys);
-	let payload = Payload::new(
-		MMR_ROOT_ID,
-		hex!("67678b4a811dc055ff865fdfdda11c7464a9c77a988af4fcdea92e38ae6c6320").to_vec(),
-	);
-	let commitment = Commitment { payload, block_number: 25, validator_set_id: 0 };
-	lc.latest_commitment = Some(commitment);
+	let mut lc = LightClient::new(public_keys);
+
+	// versionedFinalityProof: {"version":1,"commitment":{"payload":[["0x6d68","0xb530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be1"]],"blockNumber":25,"validatorSetId":0},"signatures_from":"0xe0","validator_set_len":4,"signatures_compact":["0x3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801","0x992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00","0xbfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00"]}
+	// encoded versionedFinalityProof: 0x01046d6880b530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be119000000000000000000000004e0040000000c3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00bfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00
+	let versioned_finality_proof = hex!("01046d6880b530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be119000000000000000000000004e0040000000c3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00bfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00");
+	let VersionedFinalityProof::V1(signed_commitment) =
+		VersionedFinalityProof::decode(&mut &versioned_finality_proof[..]).unwrap();
+	lc.latest_commitment = Some(signed_commitment.commitment);
 	println!("light client: {:?}", lc);
 
-	// Got cross-chain messages at block 22 with hash 0xe961cf2536958785869a8f1892c478ff5f91c5a01ece8a50d7f52cc5d31f96d3
-	let messages = hex!("04010000000000000000a90142000000307864343335393363373135666464333163363131343161626430346139396664363832326338353538383534636364653339613536383465376135366461323764100000007975616e6368616f2e746573746e6574000004cfc542fd380200000000000000");
+	// Received message: {"blockNumber":19,"commitmentHash":"0x811a05884851c1dbf833a1d67c29ab696ac92ebac1da7d9c34c106d28a949cfa","crossChainMessages":"0x040400e90142000000307864343335393363373135666464333163363131343161626430346139396664363832326338353538383534636364653339613536383465376135366461323764100000007975616e6368616f2e746573746e6574000064a7b3b6e00d000000000000000000000000000000000000000000000000","header":"0x7394643b4e84fc3eb1966186927d733c6c8abdf56f7a9559870195cf99ec99914c56ea0c9afde0c4de4f2f6e5d124ae00bfc17ea81ce3fb53dd3d7b7e7da27f23ffba85c38007a337cfc45ec6e04f7fd03b815c1663d8acf2efbd795e984859f8e100642414245b501010100000026deb110000000001086a298e70633418902e9dad1793b60d9bf7017615709b25205f1a1626b0f0358478a801133a5a0b441692a633dee432410bf00fe4a295613a6da4dff39ab05d64440558b0ef9dc33450f05bfe684a5481894572dff49dbbd74a7e11cb9850c0080811a05884851c1dbf833a1d67c29ab696ac92ebac1da7d9c34c106d28a949cfa04424545468403d09e2ef41b15439b071206ab9e4bbac0d9ea249e720c95980c9a7ab0f23420d10542414245010150e8fe7ac1aac1bb65ba97fdffddbb12f6c7fcc91e88212b6f4da34a5c3c913ce0935cb163d265f58c900204bc9c5070c383f589a8c3a3dd56a29b625d05de83"}
+	let messages = hex!("040400e90142000000307864343335393363373135666464333163363131343161626430346139396664363832326338353538383534636364653339613536383465376135366461323764100000007975616e6368616f2e746573746e6574000064a7b3b6e00d000000000000000000000000000000000000000000000000");
+	let encoded_header = hex!("7394643b4e84fc3eb1966186927d733c6c8abdf56f7a9559870195cf99ec99914c56ea0c9afde0c4de4f2f6e5d124ae00bfc17ea81ce3fb53dd3d7b7e7da27f23ffba85c38007a337cfc45ec6e04f7fd03b815c1663d8acf2efbd795e984859f8e100642414245b501010100000026deb110000000001086a298e70633418902e9dad1793b60d9bf7017615709b25205f1a1626b0f0358478a801133a5a0b441692a633dee432410bf00fe4a295613a6da4dff39ab05d64440558b0ef9dc33450f05bfe684a5481894572dff49dbbd74a7e11cb9850c0080811a05884851c1dbf833a1d67c29ab696ac92ebac1da7d9c34c106d28a949cfa04424545468403d09e2ef41b15439b071206ab9e4bbac0d9ea249e720c95980c9a7ab0f23420d10542414245010150e8fe7ac1aac1bb65ba97fdffddbb12f6c7fcc91e88212b6f4da34a5c3c913ce0935cb163d265f58c900204bc9c5070c383f589a8c3a3dd56a29b625d05de83");
 
-	// {"id":100,"jsonrpc":"2.0","method":"chain_getHeader","params":["0xe961cf2536958785869a8f1892c478ff5f91c5a01ece8a50d7f52cc5d31f96d3"]}
-	// {"jsonrpc":"2.0","result":{"digest":{"logs":["0x06424142453402040000000abc701000000000","0x0080d8ac54c560a613a6df1ac3822c72d24999499916e3edad338cd4339d6c05489f","0x044245454684031f33ca534a85015f13b1221bd63077cde02615c0dcda544f252058e500541d7d","0x0542414245010104e71e466d9268304f634093921c4c3af3f25d3ea83b21c023e2269b6ce8b92e6f944a906e584e73e3aafc74b23efdf0dc25e63ca45b57b347abfaa0c06f6781"]},"extrinsicsRoot":"0x58d6476afb15a09ca68b12ea9521cad576688ead5b9078732c1e863a93708070","number":"0x16","parentHash":"0xf00dc4fb3ffe5e87359f159b344e78b94ef0b02554cf4d620f0b763d99f9aada","stateRoot":"0x56bf9703deec2388fcc336898b2f278a7a3cf9ea5cfb753b3015440cb12ac76f"},"id":100}
-	let item0 = hex!("06424142453402040000000abc701000000000");
-	let item1 = hex!("0080d8ac54c560a613a6df1ac3822c72d24999499916e3edad338cd4339d6c05489f");
-	let item2 =
-		hex!("044245454684031f33ca534a85015f13b1221bd63077cde02615c0dcda544f252058e500541d7d");
-	let item3 = hex!("0542414245010104e71e466d9268304f634093921c4c3af3f25d3ea83b21c023e2269b6ce8b92e6f944a906e584e73e3aafc74b23efdf0dc25e63ca45b57b347abfaa0c06f6781");
-	let header = Header {
-		parent_hash: hex!("f00dc4fb3ffe5e87359f159b344e78b94ef0b02554cf4d620f0b763d99f9aada")
-			.try_into()
-			.unwrap(),
-		number: 0x16,
-		state_root: hex!("56bf9703deec2388fcc336898b2f278a7a3cf9ea5cfb753b3015440cb12ac76f")
-			.try_into()
-			.unwrap(),
-		extrinsics_root: hex!("58d6476afb15a09ca68b12ea9521cad576688ead5b9078732c1e863a93708070")
-			.try_into()
-			.unwrap(),
-		digest: Digest {
-			logs: vec![
-				Decode::decode(&mut &item0[..]).unwrap(),
-				Decode::decode(&mut &item1[..]).unwrap(),
-				Decode::decode(&mut &item2[..]).unwrap(),
-				Decode::decode(&mut &item3[..]).unwrap(),
-			],
-		},
-	};
-
-	println!("block hash #22: {:?}", header.hash());
-	println!("header #22 {:?}", header);
-	let encoded_header = header.encode();
-
-	// Query mmr leaf with leaf index 22 (NOTE: not 22-1) at block 25
-	// {"id":237,"jsonrpc":"2.0","method":"mmr_generateProof","params":[22,"0x9e1ef7817c0b5e1196324e6cdb3fcfc583ad4cf5fdf163bf40cf1b5094a8fec5"]}
-	// {"jsonrpc":"2.0","result":{
-	// "blockHash":"0x9e1ef7817c0b5e1196324e6cdb3fcfc583ad4cf5fdf163bf40cf1b5094a8fec5",
-	// "leaf":"0xc5010016000000e961cf2536958785869a8f1892c478ff5f91c5a01ece8a50d7f52cc5d31f96d3010000000000000005000000304803fa5a91d9852caafe04b4b867a4ed27a07a5bee3d1507b4b187a68777a20000000000000000000000000000000000000000000000000000000000000000",
-	// "proof":"0x16000000000000001900000000000000143b96661a7161a6a760af588ebdefc79401e1c046d889d59f76d824406f713188c58385673dc5fffca2611dec971872597fa18462ec82f781d44c7f51f888460a927066f988d8d2b5c193a0fca08920bc21c56dfd2ea44fdcd9ceb97acd22e1a5dc8d1b12b23542b45f9e025bc4e611129aae70a08a7180839c8b698becf48e2326479d9be91711c950d8584e9f9dd49b6424e13d590afc8b00a41d5be40c4fb5"},
-	// "id":237}
-
-	let encoded_mmr_leaf = hex!("c5010016000000e961cf2536958785869a8f1892c478ff5f91c5a01ece8a50d7f52cc5d31f96d3010000000000000005000000304803fa5a91d9852caafe04b4b867a4ed27a07a5bee3d1507b4b187a68777a20000000000000000000000000000000000000000000000000000000000000000");
-
-	let leaf: Vec<u8> = Decode::decode(&mut &encoded_mmr_leaf[..]).unwrap();
-	let mmr_leaf: MmrLeaf = Decode::decode(&mut &*leaf).unwrap();
-	println!("mmr_leaf: {:?}", mmr_leaf);
-
-	let encoded_mmr_proof =  hex!("16000000000000001900000000000000143b96661a7161a6a760af588ebdefc79401e1c046d889d59f76d824406f713188c58385673dc5fffca2611dec971872597fa18462ec82f781d44c7f51f888460a927066f988d8d2b5c193a0fca08920bc21c56dfd2ea44fdcd9ceb97acd22e1a5dc8d1b12b23542b45f9e025bc4e611129aae70a08a7180839c8b698becf48e2326479d9be91711c950d8584e9f9dd49b6424e13d590afc8b00a41d5be40c4fb5");
-	let mmr_proof = MmrLeafProof::decode(&mut &encoded_mmr_proof[..]);
-	println!("mmr_proof: {:?}", mmr_proof);
+	// messageProof: {"blockHash":"0x9ace34d4dcf39773de158da6ca9970ed9f7e4a3277c3d37744624fd3ec9d49ae","leaves":"0x0449010013000000a92138977c1d23f02f6b51df11f3e1a8b42a6d5800d24d01942e787904212e060100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900","proof":"0x041300000000000000190000000000000014ecbb56fad1763cfcf85065a1e7d3e640f25c24db82c9d547bba4f8a31813799bcb2e83f7faa8c4dff84c30a61f05b512663cd4abe3019573e10407246fd7ae21618b7c72796828a9c7012009eefafb59e5e9a6a96577c4a755fd43596da6685a733ed3db28efc5a12975bd882c308d430f975590cbc68cfcb415a0306c71c0185900ca2d5603cc78df844a46b9cf56f4c3d274569400cbf0c994c4c41a58f90d"}
+	let encoded_mmr_leaves =  hex!("0449010013000000a92138977c1d23f02f6b51df11f3e1a8b42a6d5800d24d01942e787904212e060100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900");
+	let encoded_mmr_proof =  hex!("041300000000000000190000000000000014ecbb56fad1763cfcf85065a1e7d3e640f25c24db82c9d547bba4f8a31813799bcb2e83f7faa8c4dff84c30a61f05b512663cd4abe3019573e10407246fd7ae21618b7c72796828a9c7012009eefafb59e5e9a6a96577c4a755fd43596da6685a733ed3db28efc5a12975bd882c308d430f975590cbc68cfcb415a0306c71c0185900ca2d5603cc78df844a46b9cf56f4c3d274569400cbf0c994c4c41a58f90d");
 
 	assert!(lc
 		.verify_solochain_messages(
 			&messages,
 			&encoded_header,
-			&encoded_mmr_leaf,
+			&encoded_mmr_leaves,
 			&encoded_mmr_proof,
 		)
 		.is_ok());
@@ -285,23 +125,21 @@ fn maximum_validators_test() {
 	let secp = Secp256k1::new();
 
 	let mut initial_public_keys = Vec::new();
-	let payload = Payload::new(
-		MMR_ROOT_ID,
-		hex!("67678b4a811dc055ff865fdfdda11c7464a9c77a988af4fcdea92e38ae6c6320").to_vec(),
-	);
-	let commitment = Commitment { payload, block_number: 25, validator_set_id: 0 };
-	let commitment_hash = commitment.hash();
+	let versioned_finality_proof_example = hex!("01046d6880b530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be119000000000000000000000004e0040000000c3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00bfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00");
+	let VersionedFinalityProof::V1(signed_commitment) =
+		VersionedFinalityProof::decode(&mut &versioned_finality_proof_example[..]).unwrap();
+	let commitment_hash = signed_commitment.commitment.hash();
 	let msg = SecpMessage::from_slice(&commitment_hash[..]).unwrap();
-	let mut signed_commitment = SignedCommitment { commitment, signatures: vec![] };
+	// re-sign this commit for testing
+	let mut signed_commitment =
+		SignedCommitment { commitment: signed_commitment.commitment, signatures: vec![] };
 
 	for _ in 0..MAX_VALIDATORS {
 		let (privkey, pubkey) = secp.generate_keypair(&mut thread_rng());
-		// println!("pubkey: {:?}", pubkey);
-		// println!("prikey: {:?}", privkey);
 		let validator_address = beefy_ecdsa_to_ethereum(&pubkey.serialize());
-		// println!("validator_address: {:?}", validator_address);
 		initial_public_keys.push(validator_address);
-		let (recover_id, signature) = secp.sign_recoverable(&msg, &privkey).serialize_compact();
+		let (recover_id, signature) =
+			secp.sign_ecdsa_recoverable(&msg, &privkey).serialize_compact();
 
 		let mut buf = [0_u8; 65];
 		buf[0..64].copy_from_slice(&signature[..]);
@@ -309,34 +147,39 @@ fn maximum_validators_test() {
 
 		signed_commitment.signatures.push(Some(Signature(buf)));
 	}
-	let encoded_signed_commitment = signed_commitment.encode();
+	let encoded_versioned_finality_proof = VersionedFinalityProof::V1(signed_commitment).encode();
 
-	let mut lc = new(vec!["0x00".to_string()]);
+	let mut lc = LightClient::new(vec!["0x00".to_string()]);
 	lc.validator_set = BeefyNextAuthoritySet {
 		id: 0,
 		len: initial_public_keys.len() as u32,
-		root: merkle_root::<Keccak256, _, _>(initial_public_keys.clone()),
+		root: merkle_root::<Keccak256, _>(initial_public_keys.clone()),
 	};
-	let mut validator_proofs = Vec::new();
+	let mut authority_set_proof = Vec::new();
 	for i in 0..initial_public_keys.len() {
 		let proof = merkle_proof::<Keccak256, _, _>(initial_public_keys.clone(), i);
-		validator_proofs.push(ValidatorMerkleProof {
-			proof: proof.proof.clone(),
-			number_of_leaves: proof.number_of_leaves,
-			leaf_index: proof.leaf_index,
-			leaf: proof.leaf,
-		});
+		authority_set_proof.push(
+			ValidatorMerkleProof {
+				root: proof.root,
+				proof: proof.proof.clone(),
+				number_of_leaves: proof.number_of_leaves as u64,
+				leaf_index: proof.leaf_index as u64,
+				leaf: proof.leaf,
+			}
+			.encode(),
+		);
 	}
 
 	println!("lc: {:?}", lc);
-	let encoded_mmr_leaf = hex!("c5010016000000e961cf2536958785869a8f1892c478ff5f91c5a01ece8a50d7f52cc5d31f96d3010000000000000005000000304803fa5a91d9852caafe04b4b867a4ed27a07a5bee3d1507b4b187a68777a20000000000000000000000000000000000000000000000000000000000000000");
-	let encoded_mmr_proof = hex!("16000000000000001900000000000000143b96661a7161a6a760af588ebdefc79401e1c046d889d59f76d824406f713188c58385673dc5fffca2611dec971872597fa18462ec82f781d44c7f51f888460a927066f988d8d2b5c193a0fca08920bc21c56dfd2ea44fdcd9ceb97acd22e1a5dc8d1b12b23542b45f9e025bc4e611129aae70a08a7180839c8b698becf48e2326479d9be91711c950d8584e9f9dd49b6424e13d590afc8b00a41d5be40c4fb5");
+
+	let encoded_mmr_leaves =  hex!("0449010017000000f126e6251f6df464796796e2167e71517141d5042c72e1f5b678914cdaffadbd0100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900");
+	let encoded_mmr_proof =  hex!("041700000000000000190000000000000014ecbb56fad1763cfcf85065a1e7d3e640f25c24db82c9d547bba4f8a31813799b9278b1352647cba599641add3192dadd29d957d3df08da96e95356eecfcb4f297236345e4e4ea051ac330d46d80d3e8c7ec6e686ef91eb7eb1f7413e375eabfb7a15d088eef383c859b75daad24f0742176a12b0aed30ab5cd069b777e9395545900ca2d5603cc78df844a46b9cf56f4c3d274569400cbf0c994c4c41a58f90d");
 	assert!(lc
 		.update_state(
-			&encoded_signed_commitment,
-			&validator_proofs,
-			&encoded_mmr_leaf,
-			&encoded_mmr_proof,
+			&encoded_versioned_finality_proof,
+			&authority_set_proof,
+			Some(&encoded_mmr_leaves),
+			Some(&encoded_mmr_proof),
 		)
 		.is_ok());
 	println!("lc: {:?}", lc);
@@ -349,23 +192,20 @@ fn update_state_in_multiple_steps() {
 	let secp = Secp256k1::new();
 
 	let mut initial_public_keys = Vec::new();
-	let payload = Payload::new(
-		MMR_ROOT_ID,
-		hex!("67678b4a811dc055ff865fdfdda11c7464a9c77a988af4fcdea92e38ae6c6320").to_vec(),
-	);
-	let commitment = Commitment { payload, block_number: 25, validator_set_id: 0 };
-	let commitment_hash = commitment.hash();
+	let versioned_finality_proof_example = hex!("01046d6880b530155bc78772edf61ce96692a3dc0a5bdf5f4cd942767314b29dc280463be119000000000000000000000004e0040000000c3c1fa45e174988a5a29a7807ef7cc9fa2dc4249aa2443a4af8ad79149f347eb6218a2657f03aded7436a23d63517126cc98d2f22b1588b7171b7c290c042b1d801992f8fecacdb97b0ea3a8b814bd6354d79e99d5fd9b75a4ca1833388c2813f2b25237cf63bc36bb82a617a7145025900c94be7597a2e2dfd9dc76719850f7afd00bfebf2f9906282d3c426e97ed0eaa867120cbcf59f74878ccc6c5b85e2ffb16f47c282483e505f225490ad9bcecb7178be7d2aacdfb6407409e54e280cf5e19e00");
+	let VersionedFinalityProof::V1(signed_commitment) =
+		VersionedFinalityProof::decode(&mut &versioned_finality_proof_example[..]).unwrap();
+	let commitment_hash = signed_commitment.commitment.hash();
 	let msg = SecpMessage::from_slice(&commitment_hash[..]).unwrap();
-	let mut signed_commitment = SignedCommitment { commitment, signatures: vec![] };
+	let mut signed_commitment =
+		SignedCommitment { commitment: signed_commitment.commitment, signatures: vec![] };
 
 	for _ in 0..MAX_VALIDATORS {
 		let (privkey, pubkey) = secp.generate_keypair(&mut thread_rng());
-		// println!("pubkey: {:?}", pubkey);
-		// println!("prikey: {:?}", privkey);
 		let validator_address = beefy_ecdsa_to_ethereum(&pubkey.serialize());
-		// println!("validator_address: {:?}", validator_address);
 		initial_public_keys.push(validator_address);
-		let (recover_id, signature) = secp.sign_recoverable(&msg, &privkey).serialize_compact();
+		let (recover_id, signature) =
+			secp.sign_ecdsa_recoverable(&msg, &privkey).serialize_compact();
 
 		let mut buf = [0_u8; 65];
 		buf[0..64].copy_from_slice(&signature[..]);
@@ -373,37 +213,40 @@ fn update_state_in_multiple_steps() {
 
 		signed_commitment.signatures.push(Some(Signature(buf)));
 	}
-	let encoded_signed_commitment = signed_commitment.encode();
+	let encoded_versioned_finality_proof = VersionedFinalityProof::V1(signed_commitment).encode();
 
-	let mut lc = new(vec!["0x00".to_string()]);
+	let mut lc = LightClient::new(vec!["0x00".to_string()]);
 	lc.validator_set = BeefyNextAuthoritySet {
 		id: 0,
 		len: initial_public_keys.len() as u32,
-		root: merkle_root::<Keccak256, _, _>(initial_public_keys.clone()),
+		root: merkle_root::<Keccak256, _>(initial_public_keys.clone()),
 	};
-	let mut validator_proofs = Vec::new();
+	let mut authority_set_proof = Vec::new();
 	for i in 0..initial_public_keys.len() {
 		let proof = merkle_proof::<Keccak256, _, _>(initial_public_keys.clone(), i);
-		validator_proofs.push(ValidatorMerkleProof {
-			proof: proof.proof.clone(),
-			number_of_leaves: proof.number_of_leaves,
-			leaf_index: proof.leaf_index,
-			leaf: proof.leaf,
-		});
+		authority_set_proof.push(
+			ValidatorMerkleProof {
+				root: proof.root,
+				proof: proof.proof.clone(),
+				number_of_leaves: proof.number_of_leaves as u64,
+				leaf_index: proof.leaf_index as u64,
+				leaf: proof.leaf,
+			}
+			.encode(),
+		);
 	}
 
 	println!("lc: {:?}", lc);
-	let encoded_mmr_leaf = hex!("c5010016000000e961cf2536958785869a8f1892c478ff5f91c5a01ece8a50d7f52cc5d31f96d3010000000000000005000000304803fa5a91d9852caafe04b4b867a4ed27a07a5bee3d1507b4b187a68777a20000000000000000000000000000000000000000000000000000000000000000");
-	let encoded_mmr_proof =  hex!("16000000000000001900000000000000143b96661a7161a6a760af588ebdefc79401e1c046d889d59f76d824406f713188c58385673dc5fffca2611dec971872597fa18462ec82f781d44c7f51f888460a927066f988d8d2b5c193a0fca08920bc21c56dfd2ea44fdcd9ceb97acd22e1a5dc8d1b12b23542b45f9e025bc4e611129aae70a08a7180839c8b698becf48e2326479d9be91711c950d8584e9f9dd49b6424e13d590afc8b00a41d5be40c4fb5");
+	let encoded_mmr_leaves =  hex!("0449010017000000f126e6251f6df464796796e2167e71517141d5042c72e1f5b678914cdaffadbd0100000000000000040000002145814fb41496b2881ca364a06e320fd1bf2fa7b94e1e37325cefbe2905651900");
+	let encoded_mmr_proof =  hex!("041700000000000000190000000000000014ecbb56fad1763cfcf85065a1e7d3e640f25c24db82c9d547bba4f8a31813799b9278b1352647cba599641add3192dadd29d957d3df08da96e95356eecfcb4f297236345e4e4ea051ac330d46d80d3e8c7ec6e686ef91eb7eb1f7413e375eabfb7a15d088eef383c859b75daad24f0742176a12b0aed30ab5cd069b777e9395545900ca2d5603cc78df844a46b9cf56f4c3d274569400cbf0c994c4c41a58f90d");
 	assert!(lc
 		.start_updating_state(
-			&encoded_signed_commitment,
-			&validator_proofs,
-			&encoded_mmr_leaf,
+			&encoded_versioned_finality_proof,
+			&authority_set_proof,
+			&encoded_mmr_leaves,
 			&encoded_mmr_proof,
 		)
 		.is_ok());
-	// println!("lc: {:?}", lc);
 	loop {
 		if let Some(ref in_process_state) = lc.in_process_state {
 			println!("position: {:?}", in_process_state.position);
@@ -411,8 +254,50 @@ fn update_state_in_multiple_steps() {
 		let result = lc.complete_updating_state(9);
 		assert!(result.is_ok());
 		if result == Ok(true) {
-			break
+			break;
 		}
 	}
 	println!("lc: {:?}", lc);
+}
+
+#[test]
+fn update_state_works2() {
+	// Received message: {
+	// 	"beefySignedCommitment":"0x01046d68807721dab6c65ce548428fed4da5c5a21f92170905378d971620262ae8256e78fc96490100230000000000000004e0040000000c97faa69b3c89f908dfddb3108c3cddac8efb62208afa6fb7f27792f79952775a4c68769ada37e4aeb95b6aa71a1719a3d7253833f530c4bfa7b881289cd0355c00f32d47d4086a2c99da8ef4f5aefed96116148a5683b427d89b10fa47406c837f1e3de5836460cf4433fac4e6e9fedb7eb3c1c9f2dffa497187eb7b06227b24f60079075f64bf4d0b4ab5a4db51f46533ad4bd57cad23c0a8dc7e3d5284ed023ed04d9503f61e4d7ca9e05ac9e7fe13a5e3e097e5af043a78149f8f8de98190e9c501",
+	// 	"authoritySetProof":[
+	// 		"0x7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b089b1167ffa810a713bc5e9ce3c274d8b2cf6b73b699a3f82721c0238b06174e91677fcc0f0878682065cca0b3699b84c771c9cf32f56d58daa81054b3978905b90400000000000000000000000000000050393b1fc4519c07621525a0da3e9cb43637532991",
+	// 		"0x7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b0896340ae9da4471c0badc836dd0551cff3b3fb06cc6888f53f3e06c62a0f2b691677fcc0f0878682065cca0b3699b84c771c9cf32f56d58daa81054b3978905b90400000000000000010000000000000050fdd274cb94ec29ea087f19b2a6494eb7b360518e",
+	// 		"0x7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b082001a3815c6d650ab1dffb8ba6eca34fa83cd88566d16516f3abd2254032e58129365938adb19c3424f69ccbab90060c9a365b9d8f2599582d09ec4a85ee714c0400000000000000020000000000000050ed950b51844c4f2f7b42eea1d9c73bce4aa2bf76",
+	// 		"0x7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b08778fd03a8579cf510ff3398d3d50ddb046e6edbbaa27ddc4936aef92eddd17ea29365938adb19c3424f69ccbab90060c9a365b9d8f2599582d09ec4a85ee714c0400000000000000030000000000000050acc26a151b42169b52292f7441822ad97c1ad5d4"],
+	// 	"mmrLeaves":"0x0449010094490100363fd25ecb399ca19152d2985ca3569212f28d54bedad81f057cc360ce6196f02400000000000000040000008787541392ace9af7313933bc1229192edb071f4811124f2932f8fb6dad2bf9700",
+	// 	"mmrProof":"0x0494490100000000009649010000000000209bf2b037309673476a96cb88f526eec0b22a9516bdb0a966feb2674ee4706d887df6af23b3b754097a90b22274b337dfd9afee094830248469e89b5d9784e239407441d3193ef12e850d6dd9c4e5b6c83455eca5d6ec53f0c7a12aa90ba64142a716dc588c8489cd4556cf997384804b0f1b2f7ed8efa131d3983899ad5738e854bb28e2e56096bf28cf2a9654e33432b70312f10d478c860de620e417b61c800c8336f0d7fe471a2809de3c69193afb3e1da09a475e99acfaf08244f8ec0b488a8d6a91843a81d52a826a71c40f3595e46ccd1b3ede705f4659feb8f6c19a94469bc8d13e0474672836713702a1e4f11316cf9e421c01d3dcec6d50174e986e"}
+
+	let public_keys = vec![
+		"0x0329a845da6531bc089b0e92baa52fa976dcd496337f25b03924898ffb6bcbe604".to_string(),
+		"0x0338a1d90b056fd6290fa080f296277b128ab0c002efe88802665cf74d15865745".to_string(),
+		"0x0320a6555b0846cdf352b4abb5dec4879c4d2379630213908603b758a88d5ef9f8".to_string(),
+		"0x025ac06ac3658a0ec3c82599a98435293139c294fae3476ea01dccef8efe77a9b0".to_string(),
+	];
+
+	let encoded_authority_set_proof = vec![
+			hex!("7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b089b1167ffa810a713bc5e9ce3c274d8b2cf6b73b699a3f82721c0238b06174e91677fcc0f0878682065cca0b3699b84c771c9cf32f56d58daa81054b3978905b90400000000000000000000000000000050393b1fc4519c07621525a0da3e9cb43637532991").to_vec(),
+			hex!("7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b0896340ae9da4471c0badc836dd0551cff3b3fb06cc6888f53f3e06c62a0f2b691677fcc0f0878682065cca0b3699b84c771c9cf32f56d58daa81054b3978905b90400000000000000010000000000000050fdd274cb94ec29ea087f19b2a6494eb7b360518e").to_vec(),
+			hex!("7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b082001a3815c6d650ab1dffb8ba6eca34fa83cd88566d16516f3abd2254032e58129365938adb19c3424f69ccbab90060c9a365b9d8f2599582d09ec4a85ee714c0400000000000000020000000000000050ed950b51844c4f2f7b42eea1d9c73bce4aa2bf76").to_vec(),
+			hex!("7bb2d85481952a5cd87cac4e2fde53047a3df1b7395dee7016e4910f8ac0b63b08778fd03a8579cf510ff3398d3d50ddb046e6edbbaa27ddc4936aef92eddd17ea29365938adb19c3424f69ccbab90060c9a365b9d8f2599582d09ec4a85ee714c0400000000000000030000000000000050acc26a151b42169b52292f7441822ad97c1ad5d4").to_vec(),
+    ];
+
+	let mut lc = LightClient::new(public_keys.clone());
+
+	let encoded_versioned_finality_proof_1 = hex!("01046d68807721dab6c65ce548428fed4da5c5a21f92170905378d971620262ae8256e78fc96490100230000000000000004e0040000000c97faa69b3c89f908dfddb3108c3cddac8efb62208afa6fb7f27792f79952775a4c68769ada37e4aeb95b6aa71a1719a3d7253833f530c4bfa7b881289cd0355c00f32d47d4086a2c99da8ef4f5aefed96116148a5683b427d89b10fa47406c837f1e3de5836460cf4433fac4e6e9fedb7eb3c1c9f2dffa497187eb7b06227b24f60079075f64bf4d0b4ab5a4db51f46533ad4bd57cad23c0a8dc7e3d5284ed023ed04d9503f61e4d7ca9e05ac9e7fe13a5e3e097e5af043a78149f8f8de98190e9c501");
+	let encoded_mmr_leaves_1 =  hex!("0449010094490100363fd25ecb399ca19152d2985ca3569212f28d54bedad81f057cc360ce6196f02400000000000000040000008787541392ace9af7313933bc1229192edb071f4811124f2932f8fb6dad2bf9700");
+	let encoded_mmr_proof_1 =  hex!("0494490100000000009649010000000000209bf2b037309673476a96cb88f526eec0b22a9516bdb0a966feb2674ee4706d887df6af23b3b754097a90b22274b337dfd9afee094830248469e89b5d9784e239407441d3193ef12e850d6dd9c4e5b6c83455eca5d6ec53f0c7a12aa90ba64142a716dc588c8489cd4556cf997384804b0f1b2f7ed8efa131d3983899ad5738e854bb28e2e56096bf28cf2a9654e33432b70312f10d478c860de620e417b61c800c8336f0d7fe471a2809de3c69193afb3e1da09a475e99acfaf08244f8ec0b488a8d6a91843a81d52a826a71c40f3595e46ccd1b3ede705f4659feb8f6c19a94469bc8d13e0474672836713702a1e4f11316cf9e421c01d3dcec6d50174e986e");
+
+	assert!(lc
+		.update_state(
+			&encoded_versioned_finality_proof_1,
+			&encoded_authority_set_proof,
+			Some(&encoded_mmr_leaves_1),
+			Some(&encoded_mmr_proof_1),
+		)
+		.is_ok());
 }
