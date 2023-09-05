@@ -35,6 +35,7 @@ std = [
 	"libsecp256k1/std",
 	"mmr-lib/std",
 	"borsh/std",
+	"serde/std",
 	"displaydoc/std",
 	"hash256-std-hasher/std",
 	"hash-db/std",
