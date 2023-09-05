@@ -29,6 +29,8 @@ pub mod mmr;
 pub mod parachain;
 pub mod simplified_mmr;
 pub mod validator_set;
+pub mod verifier_for_external_state_data;
+
 use crate::keccak256::Keccak256
 pub use commitment::BeefyPayloadId;
 use errors::Error;
